@@ -15,6 +15,10 @@ func main() {
 		fmt.Println(verinfo())
 		return
 	}
+	if *conf == "" {
+		fmt.Println("missing configuration (-conf)")
+		return
+	}
 	loadConfig(*conf)
 	http.HandleFunc("/", handler)
 	svr := http.Server{

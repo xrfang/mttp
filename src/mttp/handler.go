@@ -1,8 +1,12 @@
 package main
 
 import (
+	"compress/gzip"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -18,11 +22,37 @@ func sanitizeArgs(args []string) {
 		panic(http.StatusBadRequest)
 	}
 	qry := `SELECT 1 FROM ` + args[0] + ` LIMIT 1`
-	rows, err := db.Query(qry)
+	_, err := db.Query(qry)
 	if err != nil {
-		rows.Close()
 		panic(http.StatusNotFound)
 	}
+}
+
+func getPayload(r *http.Request) (data []map[string]interface{}) {
+	zr, err := gzip.NewReader(r.Body)
+	assert(err)
+	defer zr.Close()
+	assert(json.NewDecoder(zr).Decode(&data))
+	return
+}
+
+func prepSql(cmd, tbl string, payload []map[string]interface{}) (sql string, args []interface{}) {
+	if len(payload) == 0 {
+		panic(http.StatusNoContent)
+	}
+	var keys []string
+	for k := range payload[0] {
+		keys = append(keys, k)
+	}
+	ph := "(?" + strings.Repeat(`,?`, len(payload[0])-1) + ")"
+	sql = fmt.Sprintf(`%s INTO %s (%s) VALUES `, cmd, tbl, strings.Join(keys, ","))
+	sql += ph + strings.Repeat(","+ph, len(payload)-1)
+	for _, p := range payload {
+		for _, k := range keys {
+			args = append(args, p[k])
+		}
+	}
+	return
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -37,28 +67,68 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	args := strings.Split(r.URL.Path[1:], "/")
+	if len(args) < 1 || len(args) > 3 {
+		panic(http.StatusBadRequest)
+	}
 	sanitizeArgs(args)
-	//table := args[0]
 	switch r.Method {
 	case "GET":
-		//qry := `SELECT * FROM '%s'`
+		var where, orderby, limit string
+		var c []interface{}
+		selFrom := `SELECT * FROM ` + args[0]
+		cnt := r.URL.Query().Get("limit")
+		if cnt == "" {
+			limit = " LIMIT " + strconv.Itoa(cf.READ_LIMIT)
+		} else {
+			limit = " LIMIT " + cnt
+		}
+		if len(args) > 1 {
+			orderby = " ORDER BY " + args[1]
+		}
+		if len(args) > 2 {
+			where = " WHERE " + args[1] + ">?"
+			c = []interface{}{args[2]}
+		}
+		qry := selFrom + where + orderby + limit
+		rows, err := db.Query(qry, c...)
+		assert(err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		zw := gzip.NewWriter(w)
+		defer zw.Close()
+		assert(json.NewEncoder(zw).Encode(FetchRows(rows)))
 	case "HEAD":
-		//SELECT COUNT
+		sel := []string{`COUNT(1) AS 'Content-Length'`}
+		if len(args) > 1 {
+			sel = append(sel, `MAX(`+args[1]+`) AS 'X-Latest'`)
+		}
+		qry := `SELECT ` + strings.Join(sel, ",") + ` FROM ` + args[0]
+		rows, err := db.Query(qry)
+		assert(err)
+		for k, v := range FetchRows(rows)[0] {
+			w.Header().Add(k, fmt.Sprintf("%v", v))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
 	case "POST":
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
 		}
-		//INSERT IGNORE INTO
+		sql, args := prepSql("INSERT IGNORE", args[0], getPayload(r))
+		res, err := db.Exec(sql, args...)
+		assert(err)
+		ra, _ := res.RowsAffected()
+		fmt.Fprintf(w, "%d rows affected\n", ra)
 	case "PATCH":
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
 		}
-		//REPLACE INTO
-	case "PUT":
-		if !cf.ALLOW_WRITE || !cf.ALLOW_PUT {
-			panic(http.StatusForbidden)
-		}
-		//FLUSH + INSERT
+		sql, args := prepSql("REPLACE", args[0], getPayload(r))
+		fmt.Println(sql)
+		res, err := db.Exec(sql, args...)
+		assert(err)
+		ra, _ := res.RowsAffected()
+		fmt.Fprintf(w, "%d rows affected\n", ra)
 	default:
 		panic(http.StatusMethodNotAllowed)
 	}

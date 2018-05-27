@@ -8,7 +8,6 @@ import (
 )
 
 type Configuration struct {
-	ALLOW_PUT     bool
 	ALLOW_WRITE   bool
 	DB_USER       string
 	DB_PASS       string
@@ -16,7 +15,7 @@ type Configuration struct {
 	DB_PORT       string
 	DB_NAME       string
 	HTTP_PORT     string
-	READ_BATCH    int
+	READ_LIMIT    int
 	READ_TIMEOUT  int
 	WRITE_TIMEOUT int
 }
@@ -31,6 +30,7 @@ func loadConfig(fn string) {
 	cf.HTTP_PORT = "6887"
 	cf.READ_TIMEOUT = 60
 	cf.WRITE_TIMEOUT = 60
+	cf.READ_LIMIT = 1000
 	err := conf.ParseFile(fn, &cf)
 	assert(err)
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&sql_mode=ANSI_QUOTES",
