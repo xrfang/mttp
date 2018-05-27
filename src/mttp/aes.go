@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
-	"fmt"
 	"strconv"
 	"time"
 )
@@ -16,7 +15,6 @@ func genKey() []byte {
 		pass = strconv.Itoa(int(time.Now().UnixNano()))
 	}
 	pass += verinfo()
-	fmt.Println("pass:", pass)
 	h := sha256.New()
 	h.Write([]byte(pass))
 	return h.Sum(nil)

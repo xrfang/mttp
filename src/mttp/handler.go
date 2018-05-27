@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -29,7 +31,11 @@ func sanitizeArgs(args []string) {
 }
 
 func getPayload(r *http.Request) (data []map[string]interface{}) {
-	zr, err := gzip.NewReader(r.Body)
+	var buf bytes.Buffer
+	_, err := io.Copy(&buf, r.Body)
+	assert(err)
+	zbuf := bytes.NewBuffer(Decrypt(buf.Bytes()))
+	zr, err := gzip.NewReader(zbuf)
 	assert(err)
 	defer zr.Close()
 	assert(json.NewDecoder(zr).Decode(&data))
@@ -92,11 +98,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		qry := selFrom + where + orderby + limit
 		rows, err := db.Query(qry, c...)
 		assert(err)
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Encoding", "gzip")
-		zw := gzip.NewWriter(w)
-		defer zw.Close()
-		assert(json.NewEncoder(zw).Encode(FetchRows(rows)))
+		raw := FetchRows(rows)
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		assert(json.NewEncoder(zw).Encode(raw))
+		zw.Close()
+		output := Encrypt(buf.Bytes())
+		_, err = w.Write(output)
+		assert(err)
 	case "HEAD":
 		sel := []string{`COUNT(1) AS 'Content-Length'`}
 		if len(args) > 1 {
@@ -108,8 +117,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		for k, v := range FetchRows(rows)[0] {
 			w.Header().Add(k, fmt.Sprintf("%v", v))
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Encoding", "gzip")
 	case "POST":
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
