@@ -15,6 +15,7 @@ type Configuration struct {
 	DB_PORT       string
 	DB_NAME       string
 	HTTP_PORT     string
+	PASSWORD      string
 	READ_LIMIT    int
 	READ_TIMEOUT  int
 	WRITE_TIMEOUT int

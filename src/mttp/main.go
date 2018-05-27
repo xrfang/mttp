@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"net/http"
@@ -20,6 +21,11 @@ func main() {
 		return
 	}
 	loadConfig(*conf)
+	res := Encrypt([]byte("hello world!"))
+	fmt.Println(base64.StdEncoding.EncodeToString(res))
+	rev := Decrypt(res)
+	fmt.Println(string(rev))
+	return
 	http.HandleFunc("/", handler)
 	svr := http.Server{
 		Addr:         ":" + cf.HTTP_PORT,
