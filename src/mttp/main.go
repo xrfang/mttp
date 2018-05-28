@@ -27,6 +27,9 @@ func main() {
 	loadConfig(*conf)
 	if *dec != "" {
 		var buf bytes.Buffer
+		if *dec == "-" {
+			*dec = "/dev/stdin"
+		}
 		f, err := os.Open(*dec)
 		assert(err)
 		defer f.Close()
