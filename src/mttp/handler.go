@@ -68,7 +68,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			case int:
 				http.Error(w, http.StatusText(e.(int)), e.(int))
 			default:
-				http.Error(w, trace(e.(error).Error()).Error(), http.StatusInternalServerError)
+				http.Error(w, trace("%v", e).Error(), http.StatusInternalServerError)
 			}
 		}
 	}()
@@ -121,21 +121,32 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
 		}
-		sql, args := prepSql("INSERT IGNORE", args[0], getPayload(r))
-		res, err := db.Exec(sql, args...)
+		payload := getPayload(r)
+		sql, data := prepSql("INSERT IGNORE", args[0], payload)
+		res, err := db.Exec(sql, data...)
 		assert(err)
 		ra, _ := res.RowsAffected()
-		fmt.Fprintf(w, "%d rows affected\n", ra)
+		out := []string{strconv.Itoa(int(ra))}
+		if len(args) > 1 {
+			last := payload[len(payload)-1]
+			out = append(out, fmt.Sprintf("%v", last[args[1]]))
+		}
+		fmt.Fprintln(w, strings.Join(out, ","))
 	case "PATCH":
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
 		}
-		sql, args := prepSql("REPLACE", args[0], getPayload(r))
-		fmt.Println(sql)
-		res, err := db.Exec(sql, args...)
+		payload := getPayload(r)
+		sql, data := prepSql("REPLACE", args[0], payload)
+		res, err := db.Exec(sql, data...)
 		assert(err)
 		ra, _ := res.RowsAffected()
-		fmt.Fprintf(w, "%d rows affected\n", ra)
+		out := []string{strconv.Itoa(int(ra))}
+		if len(args) > 1 {
+			last := payload[len(payload)-1]
+			out = append(out, fmt.Sprintf("%v", last[args[1]]))
+		}
+		fmt.Fprintln(w, strings.Join(out, ","))
 	default:
 		panic(http.StatusMethodNotAllowed)
 	}
