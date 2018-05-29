@@ -42,20 +42,69 @@ func getPayload(r *http.Request) (data []map[string]interface{}) {
 	return
 }
 
-func prepSql(cmd, tbl string, payload []map[string]interface{}) (sql string, args []interface{}) {
+type dataFilter struct {
+	Mode   int                    `json:"mode"` //0=未启用；1=黑名单；2=白名单
+	Fields string                 `json:"fields"`
+	Static map[string]interface{} `json:"static"`
+	keys   map[string]bool
+}
+
+func LoadFilter(filter string) dataFilter {
+	var df dataFilter
+	err := json.Unmarshal([]byte(filter), &df)
+	if err != nil {
+		df.Mode = 0
+		df.Static = make(map[string]interface{})
+		return df
+	}
+	df.keys = make(map[string]bool)
+	for _, f := range strings.Split(df.Fields, ",") {
+		df.keys[f] = true
+	}
+	return df
+}
+
+func (df dataFilter) Append(keys []string, key string) []string {
+	if df.Mode == 0 {
+		return append(keys, key)
+	}
+	if _, ok := df.Static[key]; ok {
+		return append(keys, key)
+	}
+	_, ok := df.keys[key]
+	switch df.Mode {
+	case 1: //黑名单
+		if !ok {
+			return append(keys, key)
+		}
+	case 2: //白名单
+		if ok {
+			return append(keys, key)
+		}
+	}
+	return keys
+}
+
+func prepSql(cmd, tbl, filter string, payload []map[string]interface{}) (sql string, args []interface{}) {
 	if len(payload) == 0 {
 		panic(http.StatusNoContent)
 	}
+	f := LoadFilter(filter)
 	var keys []string
 	for k := range payload[0] {
-		keys = append(keys, k)
+		keys = f.Append(keys, k)
 	}
-	ph := "(?" + strings.Repeat(`,?`, len(payload[0])-1) + ")"
+	ph := "(?" + strings.Repeat(`,?`, len(keys)-1) + ")"
 	sql = fmt.Sprintf(`%s INTO %s (%s) VALUES `, cmd, tbl, strings.Join(keys, ","))
 	sql += ph + strings.Repeat(","+ph, len(payload)-1)
 	for _, p := range payload {
 		for _, k := range keys {
-			args = append(args, p[k])
+			v, ok := f.Static[k]
+			if ok {
+				args = append(args, v)
+			} else {
+				args = append(args, p[k])
+			}
 		}
 	}
 	return
@@ -121,13 +170,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
 		}
+		var filter string
+		if len(args) > 2 {
+			filter = args[2]
+		}
 		payload := getPayload(r)
-		sql, data := prepSql("INSERT IGNORE", args[0], payload)
+		sql, data := prepSql("INSERT IGNORE", args[0], filter, payload)
 		res, err := db.Exec(sql, data...)
 		assert(err)
 		ra, _ := res.RowsAffected()
-		out := []string{strconv.Itoa(int(ra))}
-		if len(args) > 1 {
+		out := []string{strconv.Itoa(int(ra)), strconv.Itoa(len(payload))}
+		if len(args) > 1 && args[1] != "_" {
 			last := payload[len(payload)-1]
 			out = append(out, fmt.Sprintf("%v", last[args[1]]))
 		}
@@ -136,13 +189,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if !cf.ALLOW_WRITE {
 			panic(http.StatusForbidden)
 		}
+		var filter string
+		if len(args) > 2 {
+			filter = args[2]
+		}
 		payload := getPayload(r)
-		sql, data := prepSql("REPLACE", args[0], payload)
+		sql, data := prepSql("REPLACE", args[0], filter, payload)
 		res, err := db.Exec(sql, data...)
 		assert(err)
 		ra, _ := res.RowsAffected()
-		out := []string{strconv.Itoa(int(ra))}
-		if len(args) > 1 {
+		out := []string{strconv.Itoa(int(ra)), strconv.Itoa(len(payload))}
+		if len(args) > 1 && args[1] != "_" {
 			last := payload[len(payload)-1]
 			out = append(out, fmt.Sprintf("%v", last[args[1]]))
 		}
