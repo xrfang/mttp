@@ -43,23 +43,29 @@ func getPayload(r *http.Request) (data []map[string]interface{}) {
 }
 
 type dataFilter struct {
-	Mode   int                    `json:"mode"` //0=未启用；1=黑名单；2=白名单
-	Fields string                 `json:"fields"`
-	Static map[string]interface{} `json:"static"`
-	keys   map[string]bool
+	Mode   int //0=未启用；1=黑名单；2=白名单
+	Fields map[string]bool
+	Static map[string]string
 }
 
-func LoadFilter(filter string) dataFilter {
-	var df dataFilter
-	err := json.Unmarshal([]byte(filter), &df)
-	if err != nil {
-		df.Mode = 0
-		df.Static = make(map[string]interface{})
-		return df
+func LoadFilter(filter string) (df dataFilter) {
+	df.Fields = make(map[string]bool)
+	df.Static = make(map[string]string)
+	if len(filter) == 0 {
+		return
 	}
-	df.keys = make(map[string]bool)
-	for _, f := range strings.Split(df.Fields, ",") {
-		df.keys[f] = true
+	df.Mode = 2
+	if filter[0] == '!' {
+		df.Mode = 1
+		filter = filter[1:]
+	}
+	for _, f := range strings.Split(filter, ",") {
+		kv := strings.SplitN(f, "=", 2)
+		if len(kv) == 1 {
+			df.Fields[kv[0]] = true
+		} else {
+			df.Static[kv[0]] = kv[1]
+		}
 	}
 	return df
 }
@@ -71,7 +77,7 @@ func (df dataFilter) Append(keys []string, key string) []string {
 	if _, ok := df.Static[key]; ok {
 		return append(keys, key)
 	}
-	_, ok := df.keys[key]
+	_, ok := df.Fields[key]
 	switch df.Mode {
 	case 1: //黑名单
 		if !ok {
